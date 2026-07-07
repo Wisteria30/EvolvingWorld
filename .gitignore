@@ -1,0 +1,43 @@
+# Local/generated data
+data/
+dataset/
+
+# Paper source and non-README figures
+acl_latex.tex
+figure/*
+!figure/
+!figure/pipeline.png
+
+# Chinese READMEs not included in the public GitHub repo
+README_zh.md
+**/README_zh.md
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local outputs and checkpoints
+simulation/outputs/
+evaluation/results/
+training/outputs/
+training/checkpoints/
+outputs/
+results/
+checkpoints/
+logs/
+*.log
+
+# Editor/system files
+.DS_Store
+.vscode/
+.idea/
+
+# Environment files
+.env
+.venv/
+venv/
+env/
