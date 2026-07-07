@@ -4,6 +4,10 @@ This is the official repository for the paper ***"EvolvingWorld: An Open-Schema 
 
 ## 🎯 Overview
 
+<img src="figure/pipeline.png" alt="EvolvingWorld framework pipeline" width="100%">
+
+*Overview of the EvolvingWorld data construction, simulation, and evaluation pipeline.*
+
 EvolvingWorld is an open-schema framework for simulating interactive literary worlds with two coupled components:
 
 - **World Model**: plans scenes, selects locations and casts, proposes the next actor, and updates persistent global and location-level world state.
@@ -17,10 +21,6 @@ Key features:
 - **Multi-timescale character evolution**: Hidden trackers record weak or emerging evidence before profile updates, supporting dimensions that evolve at different speeds, from short-term emotional shifts to slower personality changes.
 
 This repository includes the processed dataset, data construction scripts, SFT utilities, simulation pipeline, and trajectory-level evaluation framework.
-
-<img src="figure/pipeline.png" alt="EvolvingWorld framework pipeline" width="100%">
-
-*Overview of the EvolvingWorld data construction, simulation, and evaluation pipeline.*
 
 ## 📚 Table of Contents
 
