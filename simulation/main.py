@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import math
 import os
 import random
@@ -16,13 +17,17 @@ if __package__ is None or __package__ == "":
     if "simulation" not in sys.path:
         sys.path.insert(0, "simulation")
 
+    from agents import HumanCliController
     from inference import ClientConfig, OpenAICompatibleClient, discover_single_model
     from simulator import SimulationConfig, StorySimulator
-    from utils import dump_json, load_json, setup_logger, split_result_views
+    from translator import StreamingTranslator
+    from utils import dump_json, load_json, register_character, setup_logger, split_result_views
 else:
+    from .agents import HumanCliController
     from .inference import ClientConfig, OpenAICompatibleClient, discover_single_model
     from .simulator import SimulationConfig, StorySimulator
-    from .utils import dump_json, load_json, setup_logger, split_result_views
+    from .translator import StreamingTranslator
+    from .utils import dump_json, load_json, register_character, setup_logger, split_result_views
 
 
 def _resolve_log_model_io(cli_value: str | None) -> bool:
@@ -58,6 +63,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--server-error-patterns", nargs="+", default=None, help="Custom server error patterns to match against the 'error' field in meta.json (case-insensitive substring match). Default: 'socket hang up', 'ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED', 'Connection reset', 'Connection refused', 'read ECONNRESET', '502', '503', '504')")
     parser.add_argument("--max-tokens", type=int, default=16384, help="Max output tokens per model call (default: 16384, lower for models with smaller context window e.g. Qwen)")
     parser.add_argument("--sample-ratio", type=float, default=1.0, help="Randomly sample a fraction of test snapshots to run (0.0~1.0, default: 1.0 = all)")
+    parser.add_argument("--translate-model", default=None, help="Stream a live translated view of the story to the terminal using this model (e.g. openai/gpt-5.6-terra). Display only: saved outputs stay in the source language. Best with --num-workers 1 and a single sample.")
+    parser.add_argument("--play", default=None, help="Play a character interactively via the terminal. Pass an existing character name (e.g. 'Sherlock Holmes') or a path to a JSON file defining a new character ({name, short_description, profile, relationships?, motivation?, hidden_tracker?}) to register into the snapshot. Requires --num-workers 1 and a single sample.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for --sample-ratio sampling (default: 42)")
     return parser.parse_args()
 
@@ -66,6 +73,7 @@ def build_clients(args: argparse.Namespace, simulation_config: dict[str, Any]) -
     if args.mode == "remote":
         api_key = simulation_config["api_key"]
         base_url = simulation_config["base_url"]
+        extra_headers = simulation_config.get("extra_headers")
         if not args.world_model or not args.character_agent_model:
             raise ValueError("Remote mode requires --world-model and --character-agent-model.")
 
@@ -75,6 +83,7 @@ def build_clients(args: argparse.Namespace, simulation_config: dict[str, Any]) -
             api_key=api_key,
             model_name=args.world_model,
             mode="remote",
+            extra_headers=extra_headers,
         )
         character_agent_config = ClientConfig(
             label="character agent",
@@ -82,6 +91,7 @@ def build_clients(args: argparse.Namespace, simulation_config: dict[str, Any]) -
             api_key=api_key,
             model_name=args.character_agent_model,
             mode="remote",
+            extra_headers=extra_headers,
         )
         trace_meta = {
             "mode": "remote",
@@ -245,6 +255,27 @@ def _scan_failed_samples(
     return failed
 
 
+def _resolve_played_character(play_arg: str, snapshot: dict[str, Any]) -> str:
+    """Resolve --play into a character name, registering a new character if needed.
+
+    Pattern 1: *play_arg* is the name of a character already in the snapshot.
+    Pattern 2: *play_arg* is a path to a JSON file defining a new character
+    ({name, short_description, profile, relationships?, motivation?,
+    hidden_tracker?}); the character is injected into the snapshot's
+    character_states, with relationships folded into the profile so the world
+    model and the other character agents can see them.
+    """
+    path = Path(play_arg)
+    if path.suffix.lower() == ".json":
+        if not path.exists():
+            raise ValueError(f"--play character file not found: {play_arg}")
+        return register_character(snapshot, load_json(path))
+    if play_arg not in snapshot["character_states"]:
+        available = ", ".join(sorted(snapshot["character_states"]))
+        raise ValueError(f"--play character '{play_arg}' not found in this snapshot. Available: {available}")
+    return play_arg
+
+
 def run_single_sample(
     sample_index: int,
     snapshot: dict[str, Any],
@@ -254,6 +285,39 @@ def run_single_sample(
     split_views_dir: Path | None = None,
 ) -> tuple[int, dict[str, Any]]:
     world_model_client, character_agent_client, trace_meta = build_clients(args, simulation_config)
+
+    played_name = None
+    if args.play:
+        played_name = _resolve_played_character(args.play, snapshot)
+
+    translator = None
+    if args.translate_model:
+        translator = StreamingTranslator(
+            ClientConfig(
+                label="display translator",
+                base_url=simulation_config["base_url"],
+                api_key=simulation_config["api_key"],
+                model_name=args.translate_model,
+                mode="remote",
+                extra_headers=simulation_config.get("extra_headers"),
+            ),
+            perspective_character=played_name,
+        )
+        # Cached per-book display data: name map, relation tags, character
+        # and location cards (includes a newly registered player character).
+        translator.prepare_book_context(snapshot, played_name)
+        translator.set_sample_index(sample_index)
+
+    controllers = None
+    if played_name:
+        # Introspection (?質問) thinks with the character-agent model — the
+        # same brain that would play the character.
+        controllers = {played_name: HumanCliController(
+            played_name,
+            translator=translator,
+            introspection_client=character_agent_client,
+        )}
+
     simulator = StorySimulator(
         world_model_client=world_model_client,
         character_agent_client=character_agent_client,
@@ -263,6 +327,7 @@ def run_single_sample(
             log_model_io=_resolve_log_model_io(args.log_model_io),
             max_tokens=args.max_tokens,
         ),
+        controllers=controllers,
     )
 
     def _on_progress(intermediate_result: dict[str, Any], intermediate_trace: dict[str, Any]) -> None:
@@ -271,6 +336,8 @@ def run_single_sample(
             dump_json(_extract_meta(intermediate_result), meta_path)
         if split_views_dir is not None:
             _write_split_views(intermediate_result, split_views_dir)
+        if translator is not None:
+            translator.on_progress(intermediate_result)
 
     result, _trace = simulator.run_snapshot(snapshot, on_progress=_on_progress)
     result["sample_index"] = sample_index
@@ -368,6 +435,8 @@ def _kill_child_processes(parent_pid: int) -> None:
 
 def main() -> None:
     args = parse_args()
+    if args.play and args.num_workers != 1:
+        raise SystemExit("--play is an interactive session and requires --num-workers 1.")
     input_path = Path(args.input).expanduser().resolve()
     config_path = Path(args.config_path).expanduser().resolve()
     output_dir = Path(args.output_dir).expanduser().resolve()
@@ -514,7 +583,10 @@ def main() -> None:
             sample_dir.mkdir(parents=True, exist_ok=True)
 
             log_file = sample_dir / "simulation.log"
-            logger = setup_logger("simulation", log_file)
+            # Sequential runs are watched interactively; mirror progress logs
+            # to the terminal too (full detail with timestamps stays in
+            # simulation.log).
+            logger = setup_logger("simulation", log_file, console_level=logging.INFO)
 
             logger.info("Starting sample %s (book: %s)", sample_index, snapshot.get("book_name"))
 

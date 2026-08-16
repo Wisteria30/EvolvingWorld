@@ -1,78 +1,81 @@
 # EvolvingWorld
 
-This is the official repository for the paper ***"EvolvingWorld: An Open-Schema Framework for Co-Evolving Role-Play Agents and World Model in Interactive Literary World"***.
+本リポジトリは、論文 ***「EvolvingWorld: An Open-Schema Framework for Co-Evolving Role-Play Agents and World Model in Interactive Literary World」*** の公式リポジトリです。
 
-## 🎯 Overview
+論文は[リポジトリ内のPDF](paper/EvolvingWorld.pdf)または[arXiv:2607.17250](https://arxiv.org/abs/2607.17250)で参照できます。
 
-<img src="figure/pipeline.png" alt="EvolvingWorld framework pipeline" width="100%">
+## 🎯 概要
 
-*Overview of the EvolvingWorld data construction, simulation, and evaluation pipeline.*
+<img src="figure/pipeline_ja.png" alt="EvolvingWorldフレームワークのパイプライン" width="100%">
 
-EvolvingWorld is an open-schema framework for simulating interactive literary worlds with two coupled components:
+*EvolvingWorldにおけるデータ構築、シミュレーション、評価パイプラインの概要。*
 
-- **World Model**: plans scenes, selects locations and casts, proposes the next actor, and updates persistent global and location-level world state.
-- **Character Agent**: generates character/environment interactions, updates character state, and infers motivations for upcoming scenes.
+EvolvingWorldは、相互に連携する次の2つのコンポーネントにより、インタラクティブな文学世界をシミュレーションするオープンスキーマ型フレームワークです。
 
-Key features:
+- **世界モデル（World Model）**：シーンの計画、場所と登場人物の選択、次に行動するキャラクターの提案を行い、永続的な世界全体および場所単位の状態を更新します。
+- **キャラクターエージェント（Character Agent）**：キャラクターと環境のインタラクションを生成し、キャラクターの状態を更新するとともに、次のシーンに向けた動機を推論します。
 
-- **Open-schema state modeling**: Character profiles and global world settings are constructed with book-specific dimensions and continue to evolve during simulation.
-- **Character-world co-evolution**: Character actions can change global or location-level world states, while world changes can affect character motivations and profiles.
-- **Long-horizon simulation**: The simulation rolls forward scene by scene while persistently evolving character and world states, enabling coherent long-horizon trajectories.
-- **Multi-timescale character evolution**: Hidden trackers record weak or emerging evidence before profile updates, supporting dimensions that evolve at different speeds, from short-term emotional shifts to slower personality changes.
+主な特長：
 
-This repository includes the processed dataset, data construction scripts, SFT utilities, simulation pipeline, and trajectory-level evaluation framework.
+- **オープンスキーマ型の状態モデリング**：キャラクタープロフィールと世界全体の設定を、書籍ごとに固有の観点から構築し、シミュレーション中も継続的に変化させます。
+- **キャラクターと世界の共進化**：キャラクターの行動によって世界全体または場所単位の状態が変化し、その世界の変化がキャラクターの動機やプロフィールにも影響を与えます。
+- **長期シミュレーション**：キャラクターと世界の状態を継続的に変化させながらシーン単位でシミュレーションを進めることで、一貫性のある長期的な軌跡を生成します。
+- **複数の時間スケールにわたるキャラクターの変化**：プロフィールを更新する前に、隠れトラッカー（hidden tracker）が弱い兆候や生じつつある兆候を記録します。これにより、短期的な感情の変化から緩やかな性格の変化まで、異なる速度で変化する観点を扱えます。
 
-## 📚 Table of Contents
+本リポジトリには、処理済みデータセット、データ構築スクリプト、SFTユーティリティ、シミュレーションパイプライン、および軌跡単位の評価フレームワークが含まれています。
 
-- [Overview](#overview)
-- [Repository Structure](#repository-structure)
-- [Quick Start](#quick-start)
-  - [Preparation](#1-preparation)
-  - [Simulation](#2-simulation)
-  - [Evaluation](#3-evaluation)
-- [Training](#training)
-- [Constructing Your Own Dataset](#constructing-your-own-dataset)
-  - [Prepare Source Content](#prepare-source-content)
-  - [Extract Structured Book Data](#extract-structured-book-data)
-  - [Convert to Training and Test Data](#convert-to-training-and-test-data)
-- [Citation](#citation)
+## 📚 目次
 
-## 🗂️ Repository Structure
+- [概要](#概要)
+- [リポジトリ構成](#リポジトリ構成)
+- [クイックスタート](#クイックスタート)
+  - [準備](#1-準備)
+  - [シミュレーション](#2-シミュレーション)
+  - [評価](#3-評価)
+- [学習](#学習)
+- [独自データセットの構築](#独自データセットの構築)
+  - [元コンテンツの準備](#元コンテンツの準備)
+  - [書籍の構造化データの抽出](#書籍の構造化データの抽出)
+  - [学習・テストデータへの変換](#学習テストデータへの変換)
+- [引用](#引用)
+
+## 🗂️ リポジトリ構成
 
 ```text
 EvolvingWorld/
-├── dataset/              # Released dataset: extracted data, SFT data, and test snapshots
-├── data_construction/    # Pipeline for constructing extracted data and training/test files
-├── figure/               # README and paper figures
-├── training/             # LLaMA-Factory based SFT pipeline
-├── simulation/           # Two-model interactive simulation pipeline
-└── evaluation/           # LLM-as-judge evaluation framework
+├── dataset/              # 公開データセット：抽出済みデータ、SFTデータ、テスト用スナップショット
+├── data_construction/    # 抽出済みデータおよび学習・テスト用ファイルの構築パイプライン
+├── figure/               # READMEおよび論文用の図
+├── paper/                # 論文PDF
+├── training/             # LLaMA-FactoryベースのSFTパイプライン
+├── simulation/           # 2モデルによるインタラクティブ・シミュレーションパイプライン
+└── evaluation/           # LLM-as-a-Judge評価フレームワーク
 ```
 
-Each major module has its own README with detailed commands:
+各主要モジュールには、詳しいコマンドを記載したREADMEがあります。
 
 - `data_construction/README.md`
 - `training/README.md`
 - `simulation/README.md`
 - `evaluation/README.md`
 
-## 🚀 Quick Start
+## 🚀 クイックスタート
 
-### 🛠️ 1. Preparation
+### 🛠️ 1. 準備
 
-**Install dependencies.**
+**依存パッケージをインストールします。**
 
-We recommend using one environment for data construction, simulation, evaluation, and local vLLM serving, and a separate environment for training with LLaMA-Factory.
+データ構築、シミュレーション、評価には、ルートの `pyproject.toml` で管理する共通のuv環境を使用します。LLaMA-Factoryによる学習環境は別に管理します。
 
-For data construction, simulation, evaluation, and local vLLM serving:
+データ構築、シミュレーション、評価用：
 
 ```bash
-conda create -n evolvingworld python=3.10
-conda activate evolvingworld
-pip install vllm openai jsonlines numpy tiktoken tqdm pyyaml huggingface_hub
+uv sync
 ```
 
-For training:
+`uv sync` は `.python-version` に従ってPython 3.10と `.venv` を準備し、`uv.lock` に固定された依存パッケージをインストールします。以降のPythonコマンドは `uv run` 経由で実行してください。ローカルvLLMサーバーはGPU環境への依存が大きいため、この共通環境には含めていません。
+
+学習用（現時点ではuv移行の対象外）：
 
 ```bash
 conda create -n evolvingworld-train python=3.10
@@ -80,31 +83,31 @@ conda activate evolvingworld-train
 pip install llamafactory accelerate transformers pyyaml datasets matplotlib
 ```
 
-Unless otherwise stated, run commands from the `EvolvingWorld/` project root.
+特に記載がない限り、コマンドはプロジェクトのルートディレクトリ `EvolvingWorld/` で実行してください。
 
-**Download the dataset.**
+**データセットをダウンロードします。**
 
-The processed [EvolvingWorld dataset](https://huggingface.co/datasets/zongqing0068/EvolvingWorld) is hosted on Hugging Face:
+処理済みの[EvolvingWorldデータセット](https://huggingface.co/datasets/zongqing0068/EvolvingWorld)はHugging Faceで公開されています。
 
 ```bash
-hf download zongqing0068/EvolvingWorld \
+uv run hf download zongqing0068/EvolvingWorld \
   --repo-type dataset \
   --local-dir dataset
 ```
 
-The dataset contains:
+データセットの内容：
 
-- `dataset/extracted_data/scenes/`: standardized scene data with summaries, scenarios, interactions, character lists, and location lists.
-- `dataset/extracted_data/character_dynamic/`: dynamic character profiles, motivations, short descriptions, and hidden trackers.
-- `dataset/extracted_data/world_dynamic/`: dynamic global and location-level world states.
-- `dataset/train/`: ShareGPT-style supervised training files for the World Model and Character Agent.
-- `dataset/test/`: simulation starting snapshots and speaking-style examples for evaluation.
+- `dataset/extracted_data/scenes/`：要約、シナリオ、インタラクション、キャラクター一覧、場所一覧を含む、標準化されたシーンデータ。
+- `dataset/extracted_data/character_dynamic/`：動的なキャラクタープロフィール、動機、短い説明、隠れトラッカー。
+- `dataset/extracted_data/world_dynamic/`：動的な世界全体および場所単位の状態。
+- `dataset/train/`：世界モデルとキャラクターエージェント向けのShareGPT形式の教師あり学習ファイル。
+- `dataset/test/`：評価用のシミュレーション開始時スナップショットと発話スタイルの例。
 
-`dataset/original_books_from_gutenberg.jsonl` is an example file that demonstrates the expected raw-book input format. Each JSONL row should contain `title`, `author`, and `content` fields.
+`dataset/original_books_from_gutenberg.jsonl` は、想定される書籍の生データ入力形式を示すサンプルファイルです。JSONLの各行には、`title`、`author`、`content` フィールドを含める必要があります。
 
-**Configure API access.**
+**APIアクセスを設定します。**
 
-For scripts that call an OpenAI-compatible API, create `config.json` in the project root:
+OpenAI互換APIを呼び出すスクリプトを使用する場合は、プロジェクトのルートディレクトリに `config.json` を作成してください。
 
 ```json
 {
@@ -113,12 +116,12 @@ For scripts that call an OpenAI-compatible API, create `config.json` in the proj
 }
 ```
 
-### 🎮 2. Simulation
+### 🎮 2. シミュレーション
 
-Run one test snapshot with remote API models:
+リモートAPIモデルを使用して、テスト用スナップショットを1件実行します。
 
 ```bash
-python simulation/main.py \
+uv run python simulation/main.py \
   --input dataset/test/test_all.json \
   --mode remote \
   --world-model gemini-2.5-pro \
@@ -127,71 +130,70 @@ python simulation/main.py \
   --output-dir simulation/outputs/example_run
 ```
 
-For local vLLM serving, more detailed running instructions, and parameter descriptions, see `simulation/README.md`.
+ローカルでのvLLMサービング、より詳しい実行手順、およびパラメーターの説明については、`simulation/README.md` を参照してください。
 
-### 📊 3. Evaluation
+### 📊 3. 評価
 
 ```bash
-bash evaluation/run_all_eval.sh --judge gemini-2.5-pro example_run
+uv run bash evaluation/run_all_eval.sh --judge gemini-2.5-pro example_run
 ```
 
-We introduce two score families for trajectory-level evaluation: **CHARACTER** metrics for character consistency, evolution quality, environmental grounding, interaction quality, motivation generation, and instruction compliance; and **WORLD** metrics for scene planning, speaker management, world-state maintenance, and instruction compliance.
+軌跡単位の評価には、2種類のスコア群を導入しています。**CHARACTER**指標は、キャラクターの一貫性、変化の品質、環境との整合性、インタラクションの品質、動機生成、指示への準拠を評価します。**WORLD**指標は、シーン計画、話者管理、世界状態の維持、指示への準拠を評価します。
 
-See `evaluation/README.md` for detailed evaluation usage, input/output formats, and metric definitions.
+詳しい評価方法、入出力形式、指標の定義については、`evaluation/README.md` を参照してください。
 
-## 🧠 Training
+## 🧠 学習
 
-Training uses LLaMA-Factory. The World Model and Character Agent are trained separately (distinguished as `model_a` and `model_b` in code).
+学習にはLLaMA-Factoryを使用します。世界モデルとキャラクターエージェントは個別に学習します（コード内ではそれぞれ `model_a` と `model_b` として区別されます）。
 
-First ensure the task-level data files exist under `dataset/train/`, then run:
+まず、タスク単位のデータファイルが `dataset/train/` 配下に存在することを確認してから、以下を実行します。
 
 ```bash
-# Train the World Model (--model model_a)
+# 世界モデルを学習（--model model_a）
 bash training/run.sh --model model_a --mode full --gpu 0 \
   --model-name-or-path Qwen/Qwen2.5-7B-Instruct
 
-# Train the Character Agent (--model model_b)
+# キャラクターエージェントを学習（--model model_b）
 bash training/run.sh --model model_b --mode full --gpu 1 \
   --model-name-or-path Qwen/Qwen2.5-7B-Instruct
 ```
 
-Training hyperparameters are configured in `training/train_config.yaml`. See `training/README.md` for detailed training instructions.
+学習のハイパーパラメーターは `training/train_config.yaml` で設定します。詳しい学習手順については、`training/README.md` を参照してください。
 
-## 📦 Constructing Your Own Dataset
+## 📦 独自データセットの構築
 
-To construct an EvolvingWorld-style dataset from your own books or other fictional works, first prepare a JSONL file where each line is a book record:
+独自の書籍やその他のフィクション作品からEvolvingWorld形式のデータセットを構築するには、まず各行が1冊の書籍レコードとなるJSONLファイルを用意します。
 
 ```json
 {"title": "Pride and Prejudice", "author": "Jane Austen", "content": "..."}
 {"title": "The Picture of Dorian Gray", "author": "Oscar Wilde", "content": "..."}
 ```
 
-`dataset/original_books_from_gutenberg.jsonl` is the default input path used by the construction script. To construct your own dataset, replace this file with the raw text of the books you want to process. Alternatively, you can use the source-book JSONL provided in [`EvolvingWorld-Books-Gutenberg`](https://huggingface.co/datasets/zongqing0068/EvolvingWorld-Books-Gutenberg), which follows the same format and contains the source books used for constructing EvolvingWorld.
+構築スクリプトでは、`dataset/original_books_from_gutenberg.jsonl` をデフォルトの入力パスとして使用します。独自のデータセットを構築するには、このファイルを処理したい書籍の原文に置き換えてください。また、同じ形式でEvolvingWorldの構築に使用した原著を収録している [`EvolvingWorld-Books-Gutenberg`](https://huggingface.co/datasets/zongqing0068/EvolvingWorld-Books-Gutenberg) の書籍JSONLを使用することもできます。
 
-Then run the two-stage construction pipeline.
+続いて、2段階の構築パイプラインを実行します。
 
 ```bash
-# Step 1: extract structured book data
-python data_construction/main.py \
+# ステップ1：書籍の構造化データを抽出
+uv run python data_construction/main.py \
   --input dataset/original_books_from_gutenberg.jsonl \
   --output_dir data \
   --num_workers 8 \
   --model gemini-2.5-pro \
   --candidate_model claude-sonnet-4-5
 
-# Step 2: build training and test data
-python data_construction/transform.py \
+# ステップ2：学習・テストデータを構築
+uv run python data_construction/transform.py \
   --dir dataset/extracted_data \
   --seed 40
 ```
 
-See `data_construction/README.md` for detailed pipeline instructions and parameter descriptions.
+パイプラインの詳しい手順とパラメーターの説明については、`data_construction/README.md` を参照してください。
 
-## 📝 Citation
+## 📝 引用
 
-If you use EvolvingWorld, please cite:
+EvolvingWorldを利用する場合は、以下を引用してください。
 
 ```text
 EvolvingWorld: An Open-Schema Framework for Co-Evolving Role-Play Agents and World Model in Interactive Literary World
 ```
-

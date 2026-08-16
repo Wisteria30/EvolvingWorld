@@ -1,0 +1,100 @@
+version: '3'
+
+# EvolvingWorld — よく使うコマンド集
+# 例:
+#   task play                 # バスカヴィル家の犬(sample 44)をOpus 4.6+日本語翻訳で観劇
+#   task play OFFSET=191      # シャーロック・ホームズの冒険(OOD)を観劇
+#   task bench                # ベンチマーク本番(全222サンプル・翻訳なし)
+#   task eval RUN=opus46_bench
+# 前提: ルートの config.json にゲートウェイの接続設定(api_key / base_url / extra_headers)
+
+vars:
+  PYTHON: .venv/bin/python
+  WORLD_MODEL: anthropic/claude-opus-4-6
+  CHAR_MODEL: anthropic/claude-opus-4-6
+  TRANSLATE_MODEL: openai/gpt-5.6-terra
+
+tasks:
+  default:
+    desc: ゲームランチャーを起動(task game のエイリアス)
+    cmds:
+      - task: game
+
+  game:
+    desc: 対話式ゲームランチャー(物語・開始シーン・操作キャラ・モデル・長さを選択してプレイ)
+    deps: [dataset]
+    interactive: true
+    cmds:
+      - '{{.PYTHON}} simulation/launcher.py'
+
+  warmup:
+    desc: ランチャーの日本語メニュー(人名・図鑑・ティーザー)を全作品ぶん事前生成して simulation/menu_cache.json に保存
+    deps: [dataset]
+    cmds:
+      - '{{.PYTHON}} simulation/warm_menu_cache.py {{.CLI_ARGS}}'
+
+  dataset:
+    desc: HFからデータセットを取得(取得済みならスキップ)
+    status:
+      - test -f dataset/test/test_all.json
+    cmds:
+      - hf download zongqing0068/EvolvingWorld --repo-type dataset --local-dir dataset
+
+  play:
+    desc: '1サンプルを日本語翻訳付きで観劇/プレイ(OFFSET=44 バスカヴィル / 191〜 ホームズの冒険。CHARACTER="Sherlock Holmes" で操作、CHARACTER=my_char.json で新規キャラ登録)'
+    deps: [dataset]
+    interactive: true
+    vars:
+      OFFSET: '{{.OFFSET | default "44"}}'
+      SCENES: '{{.SCENES | default "5"}}'
+      TURNS: '{{.TURNS | default "12"}}'
+      OUTPUT: '{{.OUTPUT | default (printf "simulation/outputs/play_%s" .OFFSET)}}'
+    cmds:
+      - >-
+        {{.PYTHON}} simulation/main.py
+        --input dataset/test/test_all.json --mode remote
+        --world-model {{.WORLD_MODEL}}
+        --character-agent-model {{.CHAR_MODEL}}
+        --translate-model {{.TRANSLATE_MODEL}}
+        --max-scenes {{.SCENES}} --max-turns-per-scene {{.TURNS}}
+        --offset {{.OFFSET}} --limit 1 --num-workers 1
+        {{if .CHARACTER}}--play '{{.CHARACTER}}'{{end}}
+        --output-dir {{.OUTPUT}}
+
+  bench:
+    desc: ベンチマーク本番(全サンプル・翻訳なし・並列)
+    deps: [dataset]
+    vars:
+      WORKERS: '{{.WORKERS | default "4"}}'
+      OUTPUT: '{{.OUTPUT | default "simulation/outputs/opus46_bench"}}'
+    cmds:
+      - >-
+        {{.PYTHON}} simulation/main.py
+        --input dataset/test/test_all.json --mode remote
+        --world-model {{.WORLD_MODEL}}
+        --character-agent-model {{.CHAR_MODEL}}
+        --num-workers {{.WORKERS}}
+        --output-dir {{.OUTPUT}}
+
+  bench:rerun:
+    desc: ベンチマークの失敗・欠損サンプルだけ再実行(OUTPUTはbenchと同じ場所を指定)
+    vars:
+      WORKERS: '{{.WORKERS | default "4"}}'
+      OUTPUT: '{{.OUTPUT | default "simulation/outputs/opus46_bench"}}'
+    cmds:
+      - >-
+        {{.PYTHON}} simulation/main.py
+        --input dataset/test/test_all.json --mode remote
+        --world-model {{.WORLD_MODEL}}
+        --character-agent-model {{.CHAR_MODEL}}
+        --rerun --num-workers {{.WORKERS}}
+        --output-dir {{.OUTPUT}}
+
+  eval:
+    desc: 'LLM-as-a-Judge評価を実行(例: task eval RUN=opus46_bench)'
+    requires:
+      vars: [RUN]
+    vars:
+      JUDGE: '{{.JUDGE | default "anthropic/claude-opus-4-6"}}'
+    cmds:
+      - bash evaluation/run_all_eval.sh --judge {{.JUDGE}} {{.RUN}}

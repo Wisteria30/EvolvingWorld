@@ -12,7 +12,7 @@ The evaluation system comprises **10 dimensions and 20 sub-metrics**, divided in
 
 ### 1. Prerequisites
 
-Python 3.8+ with required dependencies (`numpy`, `openai` or a compatible HTTP client).
+Run `uv sync` from the repository root to install Python and the required dependencies.
 
 ### 2. Input Data Structure
 
@@ -37,7 +37,7 @@ Additionally, `--input_snapshots` should point to a JSON file (e.g., `test_all.j
 **Basic usage** (with default parameters):
 
 ```bash
-python evaluation/main.py \
+uv run python evaluation/main.py \
   --input_dir <simulation_outputs_dir> \
   --input_snapshots <path_to_test_all.json>
 ```
@@ -45,7 +45,7 @@ python evaluation/main.py \
 **Full parameters**:
 
 ```bash
-python evaluation/main.py \
+uv run python evaluation/main.py \
   --input_dir <simulation_outputs_dir> \
   --input_snapshots <path_to_test_all.json> \
   --output_dir evaluation/results \
@@ -75,19 +75,19 @@ python evaluation/main.py \
 **Basic usage**:
 
 ```bash
-bash evaluation/run_all_eval.sh <model_dir_1> [model_dir_2] ...
+uv run bash evaluation/run_all_eval.sh <model_dir_1> [model_dir_2] ...
 ```
 
 **Specify a Judge model**:
 
 ```bash
-bash evaluation/run_all_eval.sh --judge gpt-4o gpt-4o claude-opus-4-6
+uv run bash evaluation/run_all_eval.sh --judge gpt-4o gpt-4o claude-opus-4-6
 ```
 
 **Resume mode** (skip completed samples, only re-run missing or failed ones):
 
 ```bash
-bash evaluation/run_all_eval.sh --resume gpt-4o claude-opus-4-6
+uv run bash evaluation/run_all_eval.sh --resume gpt-4o claude-opus-4-6
 ```
 
 **Parameter Reference**:

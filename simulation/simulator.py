@@ -11,6 +11,7 @@ from typing import Any
 logger = logging.getLogger("simulation")
 
 if __package__ is None or __package__ == "":
+    from agents import CharacterController
     from inference import OpenAICompatibleClient
     from utils import (
         coerce_bool,
@@ -22,6 +23,7 @@ if __package__ is None or __package__ == "":
         remove_other_character_thoughts,
     )
 else:
+    from .agents import CharacterController
     from .inference import OpenAICompatibleClient
     from .utils import (
         coerce_bool,
@@ -116,10 +118,18 @@ class StorySimulator:
         world_model_client: OpenAICompatibleClient,
         character_agent_client: OpenAICompatibleClient,
         config: SimulationConfig,
+        controllers: dict[str, CharacterController] | None = None,
     ):
         self.world_model_client = world_model_client
         self.character_agent_client = character_agent_client
         self.config = config
+        # RL-style agent hook: maps a character name to a CharacterController
+        # (see agents.py). When the next-character step selects a controlled
+        # character, the environment builds a masked observation and asks the
+        # controller for the action text instead of calling the
+        # character-agent model. Controlled characters are also guaranteed a
+        # spot in every scene cast.
+        self.controllers = controllers or {}
         # Prompt variant choices; initialised per snapshot by _init_prompt_variants()
         self._pv: dict[str, Any] = {}
 
@@ -473,6 +483,9 @@ class StorySimulator:
                     break
 
                 involved_characters = scene_cast.get("involved_characters", []) or []
+                # The world model's casting decision stands as planned; a
+                # controlled (player) character not cast here gets a
+                # scene-entry decision after the scene is planned (see below).
                 location_scenario, location_scenario_trace = self.plan_next_scene_location_scenario(
                     state,
                     involved_characters,
@@ -489,7 +502,40 @@ class StorySimulator:
                     "motivation_updates": [],
                     "character_reflections": [],
                 }
-                motivation_trace = self.prepare_scene_motivations(state, scene_record)
+                # Scene-entry decisions: a controlled character not cast by
+                # the director may barge into the planned scene. The player
+                # supplies the entry reason, which becomes that character's
+                # motivation for the scene (their declared intent is
+                # authoritative; the model's motivation_update is skipped).
+                player_motivations: dict[str, str] = {}
+                for controlled_name, controller in self.controllers.items():
+                    if controlled_name in involved_characters or controlled_name not in state["character_states"]:
+                        continue
+                    entry = controller.decide_scene_entry({
+                        "book_name": state["book_name"],
+                        "controlled_character": controlled_name,
+                        "scene_index": scene_record["scene_index"],
+                        "involved_characters": list(involved_characters),
+                        "location": scene_record["location"],
+                        "self_state": state["character_states"].get(controlled_name, {}),
+                    })
+                    if entry:
+                        entry_text = str(entry).strip()
+                        scene_record["involved_characters"].append(controlled_name)
+                        state["character_states"][controlled_name]["motivation"] = entry_text
+                        player_motivations[controlled_name] = entry_text
+                        logger.info("Controlled character %s intervenes in scene %d", controlled_name, scene_record["scene_index"])
+                    else:
+                        logger.info("Controlled character %s stays out of scene %d (spectating)", controlled_name, scene_record["scene_index"])
+                    scene_trace.setdefault("scene_entry_decisions", []).append({
+                        "character": controlled_name,
+                        "joined": bool(entry),
+                        "entry_motivation": str(entry).strip() if entry else None,
+                    })
+
+                motivation_trace = self.prepare_scene_motivations(
+                    state, scene_record, skip_characters=set(player_motivations),
+                )
                 scene_trace["motivation_updates"] = motivation_trace
                 execution_trace = self.run_scene_execution(state, scene_record, traces, on_progress)
                 reflection_trace = self.run_scene_reflection(state, scene_record)
@@ -701,8 +747,16 @@ class StorySimulator:
         self,
         state: dict[str, Any],
         scene_record: dict[str, Any],
+        skip_characters: set[str] | None = None,
     ) -> list[dict[str, Any]]:
+        """Generate per-scene motivations for the cast.
+
+        ``skip_characters``: characters whose motivation was already set by
+        their controller (player-declared scene-entry intent) — recorded as-is
+        instead of being generated by the model.
+        """
         motivation_trace: list[dict[str, Any]] = []
+        skip_characters = skip_characters or set()
         involved_characters = scene_record.get("involved_characters", [])
         location_name = scene_record.get("location")
         location_description = state["world_state"].get("location_descriptions", {}).get(location_name, "")
@@ -711,6 +765,14 @@ class StorySimulator:
         for character_name in involved_characters:
             char_state = state["character_states"].get(character_name)
             if not char_state:
+                continue
+            if character_name in skip_characters:
+                scene_record["motivation_updates"].append({
+                    "character": character_name,
+                    "motivation": char_state.get("motivation", ""),
+                    "source": "controller_scene_entry",
+                })
+                motivation_trace.append({"character": character_name, "motivation_update_raw": {"controller_scene_entry": True}})
                 continue
             previous_interactions = (
                 format_interaction_history(
@@ -750,6 +812,45 @@ class StorySimulator:
             )
             motivation_trace.append({"character": character_name, "motivation_update_raw": trace})
         return motivation_trace
+
+    def build_controller_observation(
+        self,
+        controlled_actor: str,
+        acting_characters: list[str],
+        scene_record: dict[str, Any],
+        state: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Build the RL-style observation for a controlled character's turn.
+
+        Mirrors the information the character-agent model would receive for
+        the same turn: scene framing, the controlled character's own full
+        state, other characters' public descriptions, and the scene's
+        interaction history with other characters' private thoughts masked
+        out. Controllers must not be handed anything beyond this dict.
+        """
+        visible_interactions = mask_interactions_for_character(
+            scene_record["interactions"], [controlled_actor],
+        )
+        return {
+            "book_name": state["book_name"],
+            "controlled_character": controlled_actor,
+            "acting_characters": acting_characters,
+            "location": scene_record.get("location"),
+            "scenario": scene_record.get("scenario", ""),
+            "global_state": state["world_state"].get("global_state", ""),
+            "location_state": state["world_state"].get("location_states", {}).get(scene_record.get("location"), ""),
+            "self_state": state["character_states"].get(controlled_actor, {}),
+            "other_characters": {
+                name: {
+                    "description": state["character_states"].get(name, {}).get("short_description", ""),
+                    "motivation": state["character_states"].get(name, {}).get("motivation", ""),
+                }
+                for name in scene_record.get("involved_characters", [])
+                if name != controlled_actor
+            },
+            "interactions": visible_interactions,
+            "turn_index": len(scene_record["interactions"]),
+        }
 
     def _notify_progress(
         self,
@@ -907,31 +1008,12 @@ class StorySimulator:
                 _append_ig_turn(messages, "user", f'[{actor_label}]: {visible_content}')
             return messages
 
-        # Initialise segment-0 contexts
-        nc_messages: list[dict[str, str]] = _build_nc_context()
-        # ig_contexts keyed by tuple of acting characters to support multi-character joint actions
-        ig_contexts: dict[tuple[str, ...], list[dict[str, str]]] = {}
-
-        for turn_idx in range(self.config.max_turns_per_scene):
-            # Step 1: Ask next-character model
-            next_actor_parsed, next_actor_trace = self._call_next_character(nc_messages)
-            execution_step: dict[str, Any] = {"next_actor_raw": next_actor_trace}
-            acting_characters = self.normalize_next_actor(next_actor_parsed)
-            execution_step["selected_actor"] = acting_characters
-
-            if acting_characters == ["<SCENE_END>"]:
-                logger.info("  Scene ended after %d turns", turn_idx)
-                nc_messages.append({"role": "assistant", "content": json.dumps(["<SCENE_END>"], ensure_ascii=False)})
-                execution_trace.append(execution_step)
-                return execution_trace
-
-            logger.info("  Turn %d | actor=%s", turn_idx + 1, acting_characters)
-            # Append the next-actor prediction to nc_messages as assistant turn
-            nc_messages.append({"role": "assistant", "content": json.dumps(acting_characters, ensure_ascii=False)})
-
-            # Step 2: Generate interaction using multi-turn context
+        def _generate_model_interaction(
+            acting_characters: list[str],
+            actor_key: tuple[str, ...],
+        ) -> tuple[str, dict[str, Any]]:
+            """Generate one interaction with the character-agent model (with anti-repetition retry)."""
             # Lazily initialise ig_context for this actor combination (may have been reset by a segment split)
-            actor_key = tuple(acting_characters)
             if actor_key not in ig_contexts:
                 ig_contexts[actor_key] = _build_ig_context(acting_characters)
                 ig_contexts[actor_key] = _replay_segment_interactions_for_actor(
@@ -940,7 +1022,7 @@ class StorySimulator:
                 )
 
             messages = ig_contexts[actor_key]
-            # If the last message is from assistant (same actor acting consecutively), 
+            # If the last message is from assistant (same actor acting consecutively),
             # append a user hint to avoid errors from models without assistant prefill support.
             if messages and messages[-1]["role"] == "assistant":
                 messages.append({"role": "user", "content": "Continue."})
@@ -984,6 +1066,51 @@ class StorySimulator:
                 )
                 interaction_text = str(parsed).strip()
             messages.append({"role": "assistant", "content": interaction_text})
+            return interaction_text, trace
+
+        # Initialise segment-0 contexts
+        nc_messages: list[dict[str, str]] = _build_nc_context()
+        # ig_contexts keyed by tuple of acting characters to support multi-character joint actions
+        ig_contexts: dict[tuple[str, ...], list[dict[str, str]]] = {}
+
+        for turn_idx in range(self.config.max_turns_per_scene):
+            # Step 1: Ask next-character model
+            next_actor_parsed, next_actor_trace = self._call_next_character(nc_messages)
+            execution_step: dict[str, Any] = {"next_actor_raw": next_actor_trace}
+            acting_characters = self.normalize_next_actor(next_actor_parsed)
+            execution_step["selected_actor"] = acting_characters
+
+            if acting_characters == ["<SCENE_END>"]:
+                logger.info("  Scene ended after %d turns", turn_idx)
+                nc_messages.append({"role": "assistant", "content": json.dumps(["<SCENE_END>"], ensure_ascii=False)})
+                execution_trace.append(execution_step)
+                return execution_trace
+
+            logger.info("  Turn %d | actor=%s", turn_idx + 1, acting_characters)
+            # Append the next-actor prediction to nc_messages as assistant turn
+            nc_messages.append({"role": "assistant", "content": json.dumps(acting_characters, ensure_ascii=False)})
+
+            # Step 2: Generate interaction. When the human player's character
+            # is among the acting characters, the interaction text comes from
+            # the player instead of the character-agent model. No ig_context is
+            # created for the player (the model never generates for them);
+            # other actors receive the interaction through the regular
+            # broadcast / segment-replay paths below.
+            actor_key = tuple(acting_characters)
+            controlled_actor = next((n for n in acting_characters if n in self.controllers), None)
+            if controlled_actor is not None:
+                observation = self.build_controller_observation(
+                    controlled_actor, acting_characters, scene_record, state,
+                )
+                controller = self.controllers[controlled_actor]
+                interaction_text = str(controller.act(observation)).strip()
+                trace = {
+                    "controller": type(controller).__name__,
+                    "controlled_character": controlled_actor,
+                    "content": interaction_text,
+                }
+            else:
+                interaction_text, trace = _generate_model_interaction(acting_characters, actor_key)
 
             # Format the actor label for nc_messages and broadcast, matching training format
             actor_label = ', '.join('"' + a + '"' for a in acting_characters)

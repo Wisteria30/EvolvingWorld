@@ -6,10 +6,18 @@ Simulation pipeline for EvolvingWorld. Reads test snapshots, rolls the story for
 
 Run from the `EvolvingWorld/` directory.
 
+Set up the shared environment once:
+
+```bash
+uv sync
+```
+
+The following client commands run in the locked environment via `uv run`.
+
 **Remote API mode** (single sample):
 
 ```bash
-python simulation/main.py \
+uv run python simulation/main.py \
   --input dataset/test/test_all.json \
   --mode remote \
   --world-model gemini-2.5-pro \
@@ -21,6 +29,8 @@ python simulation/main.py \
 **Local vLLM mode** (single sample):
 
 Start two OpenAI-compatible vLLM servers first, one for the world model and one for the character agent. They can use the same checkpoint or two different checkpoints.
+
+The root uv environment intentionally does not install vLLM because its PyTorch and accelerator requirements are platform-specific. Start these servers from a separate compatible GPU environment.
 
 ```bash
 # Terminal 1: world model
@@ -37,7 +47,7 @@ Start two OpenAI-compatible vLLM servers first, one for the world model and one 
 After both servers are ready, run:
 
 ```bash
-python simulation/main.py \
+uv run python simulation/main.py \
   --input dataset/test/test_all.json \
   --mode local \
   --world-base-url http://127.0.0.1:8000/v1 \
@@ -49,7 +59,7 @@ python simulation/main.py \
 **Parallel execution** (all samples, 8 concurrent):
 
 ```bash
-python simulation/main.py \
+uv run python simulation/main.py \
   --input dataset/test/test_all.json \
   --mode remote \
   --world-model gemini-2.5-pro \
@@ -92,42 +102,42 @@ Python script supports both **sequential** and **parallel** execution. Use `--nu
 
 ```bash
 # Run all samples sequentially
-python simulation/main.py --input dataset/test/test_all.json --mode remote \
+uv run python simulation/main.py --input dataset/test/test_all.json --mode remote \
   --world-model gemini-2.5-pro --character-agent-model gemini-2.5-pro
 
 # Run only sample #5
-python simulation/main.py --input dataset/test/test_all.json --mode remote \
+uv run python simulation/main.py --input dataset/test/test_all.json --mode remote \
   --world-model gemini-2.5-pro --character-agent-model gemini-2.5-pro \
   --offset 5 --limit 1
 
 # Run samples 10~14 with 5 parallel workers
-python simulation/main.py --input dataset/test/test_all.json --mode remote \
+uv run python simulation/main.py --input dataset/test/test_all.json --mode remote \
   --world-model gemini-2.5-pro --character-agent-model gemini-2.5-pro \
   --offset 10 --limit 5 --num-workers 5
 
 # Rerun failed samples with 4 parallel workers
-python simulation/main.py --input dataset/test/test_all.json --mode remote \
+uv run python simulation/main.py --input dataset/test/test_all.json --mode remote \
   --world-model gemini-2.5-pro --character-agent-model gemini-2.5-pro \
   --rerun --num-workers 4 --output-dir simulation/outputs/remote
 
 # Rerun only server-error samples (e.g. socket hang up)
-python simulation/main.py --input dataset/test/test_all.json --mode remote \
+uv run python simulation/main.py --input dataset/test/test_all.json --mode remote \
   --world-model gemini-2.5-pro --character-agent-model gemini-2.5-pro \
   --rerun --rerun-server-error --num-workers 4 --output-dir simulation/outputs/remote
 
 # Enable full model I/O logging for debugging
-python simulation/main.py --input dataset/test/test_all.json --mode remote \
+uv run python simulation/main.py --input dataset/test/test_all.json --mode remote \
   --world-model gemini-2.5-pro --character-agent-model gemini-2.5-pro \
   --log-model-io true --offset 0 --limit 1
 
 # Local vLLM mode with Qwen (lower max-tokens to fit 32K context)
-python simulation/main.py --input dataset/test/test_all.json --mode local \
+uv run python simulation/main.py --input dataset/test/test_all.json --mode local \
   --world-base-url http://127.0.0.1:8000/v1 \
   --character-agent-base-url http://127.0.0.1:8001/v1 \
   --max-tokens 8192 --output-dir simulation/outputs/local
 
 # Randomly sample 30% of test snapshots (seed=42 for reproducibility)
-python simulation/main.py --input dataset/test/test_all.json --mode remote \
+uv run python simulation/main.py --input dataset/test/test_all.json --mode remote \
   --world-model gemini-2.5-pro --character-agent-model gemini-2.5-pro \
   --sample-ratio 0.3 --seed 42 --num-workers 8 \
   --output-dir simulation/outputs/remote

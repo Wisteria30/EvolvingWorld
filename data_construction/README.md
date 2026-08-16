@@ -4,6 +4,14 @@ This folder contains the data construction pipeline used to turn raw books into 
 
 Run all commands from the `EvolvingWorld/` directory.
 
+Set up the shared environment once from the repository root:
+
+```bash
+uv sync
+```
+
+Run the pipeline commands through `uv run` so they use the locked Python environment.
+
 ## Pipeline Overview
 
 ```text
@@ -34,7 +42,7 @@ Each JSONL row should contain a book record with fields such as `title`, `author
 ## Step 1: Extract Structured Book Data
 
 ```bash
-python data_construction/main.py \
+uv run python data_construction/main.py \
   --input dataset/original_books_from_gutenberg.jsonl \
   --output_dir data \
   --num_workers 8 \
@@ -82,7 +90,7 @@ dataset/extracted_data/
 ## Step 2: Build Training and Test Data
 
 ```bash
-python data_construction/transform.py \
+uv run python data_construction/transform.py \
   --dir dataset/extracted_data \
   --seed 40
 ```

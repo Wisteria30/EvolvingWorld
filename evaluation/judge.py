@@ -25,19 +25,28 @@ logger = logging.getLogger("evaluation")
 class JudgeClient:
     """LLM Judge client, wrapping API call logic."""
     
-    def __init__(self, api_key: str, base_url: str, model: str):
+    def __init__(self, api_key: str, base_url: str, model: str, extra_headers: dict | None = None):
         self.model = model
         self.client = OpenAI(
-            api_key=api_key,
+            api_key=api_key or "EMPTY",
             base_url=base_url,
             timeout=600,
+            default_headers=extra_headers or None,
         )
+        # No provider key -> gateway-side auth (e.g. BYOK). Omit the SDK's
+        # placeholder Authorization header so it can't override stored keys.
+        self._request_headers = None if api_key else {"Authorization": openai.Omit()}
         # Token stats: {metric_name: [token_count1, token_count2, ...]}
         self.token_stats: Dict[str, List[int]] = defaultdict(list)
+        # Gateways may namespace models as "<provider>/<model>"; detection below needs the bare name
+        bare_model = model.rsplit('/', 1)[-1]
         # Some models do not support custom temperature (e.g. gpt-5.1 series only supports default 1)
-        self._supports_temperature = not self.model.startswith('gpt-5')
+        self._supports_temperature = not bare_model.startswith('gpt-5')
+        # gpt-5.x and o-series models use max_completion_tokens instead of max_tokens
+        use_completion_tokens = bare_model.startswith('o') or bare_model.startswith('gpt-5')
+        self._token_param = 'max_completion_tokens' if use_completion_tokens else 'max_tokens'
         try:
-            self._encoder = tiktoken.encoding_for_model(model)
+            self._encoder = tiktoken.encoding_for_model(bare_model)
         except KeyError:
             # Use cl100k_base as fallback for unknown models
             self._encoder = tiktoken.get_encoding("cl100k_base")
@@ -83,13 +92,11 @@ class JudgeClient:
         for attempt in range(1, max_retries + 1):
             try:
                 # Choose parameter name based on model type
-                use_completion_tokens = self.model.startswith('o') or self.model.startswith('gpt-5')
-                token_param = 'max_completion_tokens' if use_completion_tokens else 'max_tokens'
-                
                 api_params = {
                     "model": self.model,
                     "messages": messages,
-                    token_param: max_tokens,
+                    self._token_param: max_tokens,
+                    "extra_headers": self._request_headers,
                 }
                 if self._supports_temperature:
                     api_params["temperature"] = temperature

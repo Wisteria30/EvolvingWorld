@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import openai
-from openai import OpenAI
+from openai import Omit, OpenAI
 
 if __package__ is None or __package__ == "":
     from utils import strip_chatcompletions_suffix
@@ -24,6 +24,12 @@ class ClientConfig:
     api_key: str | None
     model_name: str
     mode: str
+    # Extra HTTP headers sent with every request. Some OpenAI-compatible
+    # gateways authenticate through custom headers instead of (or in addition
+    # to) the Authorization bearer token, e.g. Cloudflare AI Gateway's
+    # "cf-aig-authorization". Populated from config.json's optional
+    # "extra_headers" object; None means no extra headers.
+    extra_headers: dict[str, str] | None = None
 
 
 class OpenAICompatibleClient:
@@ -33,9 +39,27 @@ class OpenAICompatibleClient:
             api_key=config.api_key or "EMPTY",
             base_url=strip_chatcompletions_suffix(config.base_url),
             timeout=600,
+            default_headers=config.extra_headers or None,
         )
+        # With no provider API key configured, authentication is expected to
+        # happen gateway-side (e.g. BYOK stored keys selected via
+        # extra_headers). The SDK would still send "Authorization: Bearer
+        # EMPTY", which gateways forward to the provider where it overrides
+        # the stored key — so omit the header on every request instead.
+        self.request_headers = None if config.api_key else {"Authorization": Omit()}
         # Determine parameter format based on model name (no probing to avoid rate limit issues)
         self._use_max_completion_tokens, self._skip_temperature = self._infer_param_style()
+
+    @staticmethod
+    def _bare_model_name(model_name: str) -> str:
+        """Strip a gateway namespace prefix, e.g. "openai/gpt-5.1" -> "gpt-5.1".
+
+        OpenAI-compatible gateways (Cloudflare AI Gateway /compat and REST
+        endpoints, LiteLLM, etc.) namespace models as "<provider>/<model>".
+        Parameter-style detection must see the bare model name, otherwise
+        prefix-anchored patterns like "^gpt-5" never match.
+        """
+        return model_name.rsplit("/", 1)[-1]
 
     @staticmethod
     def _is_reasoning_model(model_name: str) -> bool:
@@ -76,7 +100,7 @@ class OpenAICompatibleClient:
 
         Returns (use_max_completion_tokens, skip_temperature).
         """
-        model = self.config.model_name
+        model = self._bare_model_name(self.config.model_name)
         self._is_qwen3 = self._is_qwen3_series(model)
         if self._is_qwen3:
             logger.info(
@@ -117,6 +141,59 @@ class OpenAICompatibleClient:
                 })
         return wrapped
 
+    def _build_request_kwargs(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int,
+        temperature: float,
+        extra_body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Assemble chat.completions kwargs with the model-specific parameter style."""
+        # Qwen3 series requires content to be wrapped in multimodal format
+        actual_messages = self._wrap_qwen3_messages(messages) if self._is_qwen3 else messages
+
+        request_kwargs: dict[str, Any] = {
+            "model": self.config.model_name,
+            "messages": actual_messages,
+            "extra_headers": self.request_headers,
+        }
+        # Choose correct token limit based on detection
+        if self._use_max_completion_tokens:
+            request_kwargs["max_completion_tokens"] = max_tokens
+        else:
+            request_kwargs["max_tokens"] = max_tokens
+        # Qwen3 series uses fixed hyperparameters: temperature=0.7, top_p=0.8, enable_thinking=False
+        if self._is_qwen3:
+            request_kwargs["temperature"] = 0.7
+            request_kwargs["top_p"] = 0.8
+            request_kwargs["extra_body"] = {
+                **(extra_body or {}),
+                "enable_thinking": False,
+            }
+        else:
+            # Decide whether to pass temperature based on detection
+            if not self._skip_temperature:
+                request_kwargs["temperature"] = temperature
+            if extra_body:
+                request_kwargs["extra_body"] = extra_body
+        return request_kwargs
+
+    def stream_chat(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int = 4096,
+        temperature: float = 0.6,
+    ):
+        """Yield response text pieces as they stream in (no retry loop)."""
+        request_kwargs = self._build_request_kwargs(messages, max_tokens, temperature)
+        stream = self.client.chat.completions.create(stream=True, **request_kwargs)
+        for event in stream:
+            if not event.choices:
+                continue
+            piece = getattr(event.choices[0].delta, "content", None)
+            if piece:
+                yield piece
+
     def chat(
         self,
         messages: list[dict[str, str]],
@@ -127,33 +204,7 @@ class OpenAICompatibleClient:
     ) -> str:
         for attempt in range(1, max_retries + 1):
             try:
-                # Qwen3 series requires content to be wrapped in multimodal format
-                actual_messages = self._wrap_qwen3_messages(messages) if self._is_qwen3 else messages
-
-                request_kwargs: dict[str, Any] = {
-                    "model": self.config.model_name,
-                    "messages": actual_messages,
-                }
-                # Choose correct token limit based on detection
-                if self._use_max_completion_tokens:
-                    request_kwargs["max_completion_tokens"] = max_tokens
-                else:
-                    request_kwargs["max_tokens"] = max_tokens
-                # Qwen3 series uses fixed hyperparameters: temperature=0.7, top_p=0.8, enable_thinking=False
-                if self._is_qwen3:
-                    request_kwargs["temperature"] = 0.7
-                    request_kwargs["top_p"] = 0.8
-                    request_kwargs["extra_body"] = {
-                        **(extra_body or {}),
-                        "enable_thinking": False,
-                    }
-                else:
-                    # Decide whether to pass temperature based on detection
-                    if not self._skip_temperature:
-                        request_kwargs["temperature"] = temperature
-                    if extra_body:
-                        request_kwargs["extra_body"] = extra_body
-
+                request_kwargs = self._build_request_kwargs(messages, max_tokens, temperature, extra_body)
                 completion = self.client.chat.completions.create(**request_kwargs)
                 choice = completion.choices[0]
                 if choice.finish_reason == "length":

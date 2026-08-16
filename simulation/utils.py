@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 
-def setup_logger(name: str, log_file: Path) -> logging.Logger:
+def setup_logger(name: str, log_file: Path, console_level: int | None = None) -> logging.Logger:
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
     logger.handlers.clear()
@@ -18,7 +18,50 @@ def setup_logger(name: str, log_file: Path) -> logging.Logger:
     file_handler = logging.FileHandler(log_file, encoding="utf-8")
     file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
     logger.addHandler(file_handler)
+
+    # Optionally mirror records at or above *console_level* to stderr so
+    # progress and failures are visible in the terminal (full detail with
+    # timestamps stays in the file).
+    if console_level is not None:
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(console_level)
+        console_handler.setFormatter(_ConsoleFormatter())
+        logger.addHandler(console_handler)
     return logger
+
+
+class _ConsoleFormatter(logging.Formatter):
+    """Compact terminal format: bare message for INFO, level prefix above that."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        message = record.getMessage()
+        if record.levelno >= logging.WARNING:
+            return f"{record.levelname}: {message}"
+        return message
+
+
+def register_character(snapshot: dict[str, Any], definition: dict[str, Any]) -> str:
+    """Add a new character to a snapshot's character_states and return its name.
+
+    ``definition``: {name, short_description, profile, relationships?,
+    motivation?, hidden_tracker?}. Relationships are folded into the profile
+    text so the world model and the other character agents can see them.
+    """
+    name = (definition.get("name") or "").strip()
+    if not name:
+        raise ValueError("character definition must include a 'name'")
+    profile = definition.get("profile", "")
+    relationships = definition.get("relationships") or {}
+    if relationships:
+        rel_lines = "\n".join(f"- {other}: {desc}" for other, desc in relationships.items())
+        profile = f"{profile}\n\nRelationships:\n{rel_lines}".strip()
+    snapshot["character_states"][name] = {
+        "profile": profile,
+        "short_description": definition.get("short_description", ""),
+        "motivation": definition.get("motivation", ""),
+        "hidden_tracker": definition.get("hidden_tracker", ""),
+    }
+    return name
 
 
 def load_json(path: str | Path) -> Any:

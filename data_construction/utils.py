@@ -240,20 +240,26 @@ def get_response(model, messages, nth_generation=0, max_retries=3, **kwargs):
 	for retry_count in range(max_retries):
 		try:
 			import openai 
-			client = openai.OpenAI(api_key=config['api_key'], base_url=config['base_url'], timeout=720)
+			client = openai.OpenAI(api_key=config['api_key'] or 'EMPTY', base_url=config['base_url'], timeout=720, default_headers=config.get('extra_headers') or None)
+			# No provider key -> gateway-side auth (e.g. BYOK). Omit the SDK's
+			# placeholder Authorization header so it can't override stored keys.
+			request_headers = None if config['api_key'] else {'Authorization': openai.Omit()}
 
 			max_tokens = 65536
 
 			# gpt-5.2 and o-series models use max_completion_tokens instead of max_tokens
-			use_completion_tokens = model.startswith('o') or model.startswith('gpt-5')
+			# (gateways may namespace models as "<provider>/<model>"; strip to the bare name first)
+			bare_model = model.rsplit('/', 1)[-1]
+			use_completion_tokens = bare_model.startswith('o') or bare_model.startswith('gpt-5')
 			token_param = 'max_completion_tokens' if use_completion_tokens else 'max_tokens'
 
-			if streaming: 
+			if streaming:
 				stream = client.chat.completions.create(
 					model=model,
 					messages=messages,
 					stream=True,
 					**{token_param: max_tokens},
+					extra_headers=request_headers,
 					temperature=0 if nth_generation == 0 else 1,
 					timeout=720
 				)
@@ -274,6 +280,7 @@ def get_response(model, messages, nth_generation=0, max_retries=3, **kwargs):
 					model=model,
 					messages=messages,
 					**{token_param: max_tokens},
+					extra_headers=request_headers,
 					temperature=0 if nth_generation == 0 else 1,
 					timeout=720
 				)

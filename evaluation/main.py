@@ -350,6 +350,7 @@ def evaluate_single_sample(
             api_key=config["api_key"],
             base_url=config["base_url"],
             model=judge_model,
+            extra_headers=config.get("extra_headers"),
         )
         
         # ================================================================ #

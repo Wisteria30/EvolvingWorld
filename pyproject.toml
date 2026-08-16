@@ -1,0 +1,18 @@
+[project]
+name = "evolvingworld"
+version = "0.1.0"
+description = "Data construction, simulation, and evaluation utilities for EvolvingWorld"
+readme = "README.md"
+requires-python = "==3.10.*"
+dependencies = [
+    "huggingface-hub",
+    "jsonlines",
+    "numpy",
+    "openai",
+    "pyyaml",
+    "tiktoken",
+    "tqdm",
+]
+
+[tool.uv]
+package = false

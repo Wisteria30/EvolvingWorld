@@ -1,12 +1,14 @@
 # Local/generated data
 data/
 dataset/
+config.json
 
 # Paper source and non-README figures
 acl_latex.tex
 figure/*
 !figure/
 !figure/pipeline.png
+!figure/pipeline_ja.png
 
 # Chinese READMEs not included in the public GitHub repo
 README_zh.md
